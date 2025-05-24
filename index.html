@@ -54,7 +54,7 @@
       background-color: #000;
       color: #fff;
       font-family: Arial, sans-serif;
-      transition: background-color 0.3s;
+      transition: background-color 0.2s;
     }
     .flash {
       background-color: red !important;
@@ -76,18 +76,17 @@
   </style>
 </head>
 <body>
-  <p id="status">Press Start to enable noise detection</p>
   <button id="startBtn">Start</button>
 
   <script>
     const startBtn = document.getElementById('startBtn');
-    const status = document.getElementById('status');
     let audioContext = null;
     let analyser = null;
     let microphone = null;
+    let videoTrack = null;
 
-    // Threshold for detecting a loud noise (lowered for higher sensitivity)
-    const LOUD_THRESHOLD = 30; // in dB, reduced from 50 to make detection more sensitive
+    // Threshold for detecting a loud noise
+    const LOUD_THRESHOLD = 50; // in dB, set to 50 as requested
 
     // Function to calculate dB level from audio input
     function getDecibelLevel(dataArray, bufferLength) {
@@ -100,17 +99,33 @@
       return db;
     }
 
-    // Function to flash screen and vibrate
+    // Function to toggle camera flash
+    async function toggleFlash(on) {
+      if (videoTrack) {
+        try {
+          await videoTrack.applyConstraints({
+            advanced: [{ torch: on }]
+          });
+        } catch (err) {
+          console.warn('Torch not supported or error: ', err.message);
+        }
+      }
+    }
+
+    // Function to flash screen, vibrate, and toggle camera flash
     function triggerAlert() {
       document.body.classList.add('flash');
-      // Vibrate for 500ms if supported
+      // Vibrate for 200ms if supported
       if ('vibrate' in navigator) {
-        navigator.vibrate(500);
+        navigator.vibrate(200);
       }
-      // Remove flash after 300ms
+      // Turn on camera flash
+      toggleFlash(true);
+      // Remove flash and turn off camera flash after 200ms
       setTimeout(() => {
         document.body.classList.remove('flash');
-      }, 300);
+        toggleFlash(false);
+      }, 200);
     }
 
     // Function to process audio
@@ -130,23 +145,35 @@
       }
     }
 
-    // Start audio processing
+    // Start audio processing and camera access
     async function startDetection() {
       try {
+        // Request microphone access
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048;
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        microphone = audioContext.createMediaStreamSource(stream);
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        microphone = audioContext.createMediaStreamSource(audioStream);
         microphone.connect(analyser);
 
-        status.textContent = 'Listening for loud noises...';
+        // Request camera access for torch
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' }
+          });
+          videoTrack = videoStream.getVideoTracks()[0];
+        } catch (err) {
+          console.warn('Camera access for torch failed: ', err.message);
+        }
+
+        startBtn.textContent = 'Listening...';
         startBtn.disabled = true;
 
         processAudio();
       } catch (err) {
-        status.textContent = 'Error accessing microphone: ' + err.message;
+        startBtn.textContent = 'Error: ' + err.message;
+        startBtn.disabled = true;
       }
     }
 
@@ -160,6 +187,13 @@
       } else if (document.visibilityState === 'hidden' && audioContext) {
         audioContext.suspend();
       }
+    });
+
+    // Clean up streams on page unload
+    window.addEventListener('beforeunload', () => {
+      if (videoTrack) videoTrack.stop();
+      if (microphone) microphone.mediaStream.getTracks().forEach(track => track.stop());
+      if (audioContext) audioContext.close();
     });
   </script>
 </body>
