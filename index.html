@@ -86,8 +86,8 @@
     let analyser = null;
     let microphone = null;
 
-    // Threshold for detecting a loud noise (adjust as needed)
-    const LOUD_THRESHOLD = 80; // in dB
+    // Threshold for detecting a loud noise (lowered for higher sensitivity)
+    const LOUD_THRESHOLD = 30; // in dB, reduced from 50 to make detection more sensitive
 
     // Function to calculate dB level from audio input
     function getDecibelLevel(dataArray, bufferLength) {
@@ -113,7 +113,7 @@
       }, 300);
     }
 
-    // Function to process audio input
+    // Function to process audio
     function processAudio() {
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
