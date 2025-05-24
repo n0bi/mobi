@@ -1,0 +1,166 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loud Noise Detector</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      transition: background-color 0.3s;
+    }
+    .flash {
+      background-color: red !important;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+    p {
+      font-size: 18px;
+      margin: 20px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <p id="status">Press Start to enable noise detection</p>
+  <button id="startBtn">Start</button>
+
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const status = document.getElementById('status');
+    let audioContext = null;
+    let analyser = null;
+    let microphone = null;
+
+    // Threshold for detecting a loud noise (adjust as needed)
+    const LOUD_THRESHOLD = 80; // in dB
+
+    // Function to calculate dB level from audio input
+    function getDecibelLevel(dataArray, bufferLength) {
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i] * dataArray[i];
+      }
+      const rms = Math.sqrt(sum / bufferLength);
+      const db = 20 * Math.log10(rms);
+      return db;
+    }
+
+    // Function to flash screen and vibrate
+    function triggerAlert() {
+      document.body.classList.add('flash');
+      // Vibrate for 500ms if supported
+      if ('vibrate' in navigator) {
+        navigator.vibrate(500);
+      }
+      // Remove flash after 300ms
+      setTimeout(() => {
+        document.body.classList.remove('flash');
+      }, 300);
+    }
+
+    // Function to process audio input
+    function processAudio() {
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyser.getByteTimeDomainData(dataArray);
+
+      const dbLevel = getDecibelLevel(dataArray, bufferLength);
+      if (dbLevel > LOUD_THRESHOLD) {
+        triggerAlert();
+      }
+
+      // Continue processing
+      if (audioContext.state !== 'closed') {
+        requestAnimationFrame(processAudio);
+      }
+    }
+
+    // Start audio processing
+    async function startDetection() {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        microphone = audioContext.createMediaStreamSource(stream);
+        microphone.connect(analyser);
+
+        status.textContent = 'Listening for loud noises...';
+        startBtn.disabled = true;
+
+        processAudio();
+      } catch (err) {
+        status.textContent = 'Error accessing microphone: ' + err.message;
+      }
+    }
+
+    // Event listener for start button
+    startBtn.addEventListener('click', startDetection);
+
+    // Handle visibility change to pause/resume audio context
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && audioContext && audioContext.state === 'suspended') {
+        audioContext.resume();
+      } else if (document.visibilityState === 'hidden' && audioContext) {
+        audioContext.suspend();
+      }
+    });
+  </script>
+</body>
+</html>
