@@ -67,26 +67,49 @@
       color: white;
       border: none;
       border-radius: 5px;
+      margin-bottom: 20px;
     }
-    p {
-      font-size: 18px;
-      margin: 20px;
-      text-align: center;
+    .slider-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 80%;
+      max-width: 300px;
+    }
+    input[type="range"] {
+      width: 100%;
+      margin: 10px 0;
+    }
+    label {
+      font-size: 16px;
+    }
+    #thresholdValue {
+      font-size: 16px;
+      margin-top: 5px;
     }
   </style>
 </head>
 <body>
   <button id="startBtn">Start</button>
+  <div class="slider-container">
+    <label for="thresholdSlider">Noise Sensitivity (dB):</label>
+    <input type="range" id="thresholdSlider" min="20" max="80" value="41" step="1">
+    <span id="thresholdValue">41 dB</span>
+  </div>
 
   <script>
     const startBtn = document.getElementById('startBtn');
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const thresholdValue = document.getElementById('thresholdValue');
     let audioContext = null;
     let analyser = null;
     let microphone = null;
     let videoTrack = null;
 
-    // Threshold for detecting a loud noise
-    const LOUD_THRESHOLD = 41; // in dB, unchanged as requested
+    // Update displayed threshold value when slider changes
+    thresholdSlider.addEventListener('input', () => {
+      thresholdValue.textContent = `${thresholdSlider.value} dB`;
+    });
 
     // Function to calculate dB level from audio input
     function getDecibelLevel(dataArray, bufferLength) {
@@ -135,7 +158,8 @@
       analyser.getByteTimeDomainData(dataArray);
 
       const dbLevel = getDecibelLevel(dataArray, bufferLength);
-      if (dbLevel > LOUD_THRESHOLD) {
+      const currentThreshold = parseInt(thresholdSlider.value);
+      if (dbLevel > currentThreshold) {
         triggerAlert();
       }
 
@@ -169,6 +193,7 @@
 
         startBtn.textContent = 'Listening...';
         startBtn.disabled = true;
+        thresholdSlider.disabled = false;
 
         processAudio();
       } catch (err) {
