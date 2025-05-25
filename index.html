@@ -93,6 +93,13 @@
       margin-top: 10px;
       text-align: center;
     }
+    #error {
+      font-size: 14px;
+      color: #ff6666;
+      margin-top: 10px;
+      text-align: center;
+      max-width: 80%;
+    }
   </style>
 </head>
 <body>
@@ -103,131 +110,161 @@
     <span id="thresholdValue">41.0 dB</span>
     <p id="note">If detection seems inconsistent, try adjusting the threshold slightly.</p>
   </div>
+  <p id="error"></p>
 
   <script>
     const startBtn = document.getElementById('startBtn');
     const thresholdSlider = document.getElementById('thresholdSlider');
     const thresholdValue = document.getElementById('thresholdValue');
+    const errorDisplay = document.getElementById('error');
     let audioContext = null;
     let analyser = null;
     let microphone = null;
     let videoTrack = null;
 
-    // Update displayed threshold value when slider changes
-    thresholdSlider.addEventListener('input', () => {
-      thresholdValue.textContent = `${parseFloat(thresholdSlider.value).toFixed(1)} dB`;
-    });
-
-    // Function to calculate dB level from audio input
-    function getDecibelLevel(dataArray, bufferLength) {
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i] * dataArray[i];
-      }
-      const rms = Math.sqrt(sum / bufferLength);
-      if (rms === 0) return -Infinity; // Avoid log10(0)
-      const db = 20 * Math.log10(rms);
-      return db;
+    // Function to display errors
+    function showError(message) {
+      errorDisplay.textContent = message;
     }
 
-    // Function to toggle camera flash
-    async function toggleFlash(on) {
-      if (videoTrack) {
-        try {
-          await videoTrack.applyConstraints({
-            advanced: [{ torch: on }]
-          });
-        } catch (err) {
-          console.warn('Torch not supported or error: ', err.message);
+    // Check for Vibration API support
+    const hasVibration = 'vibrate' in navigator;
+    if (!hasVibration) {
+      showError('Vibration not supported on this device/browser. Other features will still work.');
+    }
+
+    // Check for Web Audio API support
+    const hasAudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!hasAudioContext) {
+      showError('Audio detection not supported on this browser.');
+      startBtn.disabled = true;
+    } else {
+      // Update displayed threshold value when slider changes
+      thresholdSlider.addEventListener('input', () => {
+        thresholdValue.textContent = `${parseFloat(thresholdSlider.value).toFixed(1)} dB`;
+      });
+
+      // Function to calculate dB level from audio input
+      function getDecibelLevel(dataArray, bufferLength) {
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i] * dataArray[i];
+        }
+        const rms = Math.sqrt(sum / bufferLength);
+        if (rms === 0) return -Infinity; // Avoid log10(0)
+        const db = 20 * Math.log10(rms);
+        return db;
+      }
+
+      // Function to toggle camera flash
+      async function toggleFlash(on) {
+        if (videoTrack) {
+          try {
+            await videoTrack.applyConstraints({
+              advanced: [{ torch: on }]
+            });
+          } catch (err) {
+            console.warn('Torch not supported or error: ', err.message);
+            if (on && !errorDisplay.textContent.includes('torch')) {
+              showError(errorDisplay.textContent + ' Camera flash not supported on this device/browser.');
+            }
+          }
         }
       }
-    }
 
-    // Function to flash screen, vibrate, and toggle camera flash
-    function triggerAlert() {
-      document.body.classList.add('flash');
-      // Vibrate for 600ms if supported
-      if ('vibrate' in navigator) {
-        navigator.vibrate(600);
-      }
-      // Turn on camera flash
-      toggleFlash(true);
-      // Remove flash and turn off camera flash after 200ms
-      setTimeout(() => {
-        document.body.classList.remove('flash');
-        toggleFlash(false);
-      }, 200);
-    }
-
-    // Function to process audio
-    function processAudio() {
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteTimeDomainData(dataArray);
-
-      const dbLevel = getDecibelLevel(dataArray, bufferLength);
-      const currentThreshold = parseFloat(thresholdSlider.value);
-      if (dbLevel > currentThreshold) {
-        triggerAlert();
+      // Function to flash screen, vibrate, and toggle camera flash
+      function triggerAlert() {
+        document.body.classList.add('flash');
+        // Vibrate for 600ms if supported
+        if (hasVibration) {
+          navigator.vibrate(600);
+        }
+        // Turn on camera flash
+        toggleFlash(true);
+        // Remove flash and turn off camera flash after 200ms
+        setTimeout(() => {
+          document.body.classList.remove('flash');
+          toggleFlash(false);
+        }, 200);
       }
 
-      // Continue processing
-      if (audioContext.state !== 'closed') {
-        requestAnimationFrame(processAudio);
-      }
-    }
+      // Function to process audio
+      function processAudio() {
+        if (!analyser) return;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyser.getByteTimeDomainData(dataArray);
 
-    // Start audio processing and camera access
-    async function startDetection() {
-      try {
-        // Request microphone access
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 2048;
-
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        microphone = audioContext.createMediaStreamSource(audioStream);
-        microphone.connect(analyser);
-
-        // Request camera access for torch
-        try {
-          const videoStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' }
-          });
-          videoTrack = videoStream.getVideoTracks()[0];
-        } catch (err) {
-          console.warn('Camera access for torch failed: ', err.message);
+        const dbLevel = getDecibelLevel(dataArray, bufferLength);
+        const currentThreshold = parseFloat(thresholdSlider.value);
+        if (dbLevel > currentThreshold) {
+          triggerAlert();
         }
 
-        startBtn.textContent = 'Listening...';
-        startBtn.disabled = true;
-        thresholdSlider.disabled = false;
-
-        processAudio();
-      } catch (err) {
-        startBtn.textContent = 'Error: ' + err.message;
-        startBtn.disabled = true;
+        // Continue processing
+        if (audioContext && audioContext.state !== 'closed') {
+          requestAnimationFrame(processAudio);
+        }
       }
+
+      // Start audio processing and camera access
+      async function startDetection() {
+        try {
+          // Request microphone access
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          analyser = audioContext.createAnalyser();
+          analyser.fftSize = 2048;
+
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          microphone = audioContext.createMediaStreamSource(audioStream);
+          microphone.connect(analyser);
+
+          // Request camera access for torch (optional)
+          try {
+            const videoStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'environment' }
+            });
+            videoTrack = videoStream.getVideoTracks()[0];
+          } catch (err) {
+            console.warn('Camera access for torch failed: ', err.message);
+            showError('Camera flash not supported on this device/browser.');
+          }
+
+          startBtn.textContent = 'Listening...';
+          startBtn.disabled = true;
+          thresholdSlider.disabled = false;
+
+          processAudio();
+        } catch (err) {
+          showError('Error accessing microphone: ' + err.message);
+          startBtn.textContent = 'Error';
+          startBtn.disabled = true;
+        }
+      }
+
+      // Event listener for start button
+      startBtn.addEventListener('click', startDetection);
+
+      // Handle visibility change to pause/resume audio context (with Safari compatibility)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().catch(err => {
+            console.warn('Failed to resume audio context: ', err.message);
+          });
+        } else if (document.visibilityState === 'hidden' && audioContext) {
+          audioContext.suspend().catch(err => {
+            console.warn('Failed to suspend audio context: ', err.message);
+          });
+        }
+      });
+
+      // Clean up streams on page unload
+      window.addEventListener('beforeunload', () => {
+        if (videoTrack) videoTrack.stop();
+        if (microphone) microphone.mediaStream.getTracks().forEach(track => track.stop());
+        if (audioContext) audioContext.close();
+      });
     }
-
-    // Event listener for start button
-    startBtn.addEventListener('click', startDetection);
-
-    // Handle visibility change to pause/resume audio context
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && audioContext && audioContext.state === 'suspended') {
-        audioContext.resume();
-      } else if (document.visibilityState === 'hidden' && audioContext) {
-        audioContext.suspend();
-      }
-    });
-
-    // Clean up streams on page unload
-    window.addEventListener('beforeunload', () => {
-      if (videoTrack) videoTrack.stop();
-      if (microphone) microphone.mediaStream.getTracks().forEach(track => track.stop());
-      if (audioContext) audioContext.close();
-    });
   </script>
 </body>
 </html>
